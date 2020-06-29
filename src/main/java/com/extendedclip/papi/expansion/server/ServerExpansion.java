@@ -39,6 +39,7 @@ import org.bukkit.OfflinePlayer;
 import org.bukkit.World;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.PluginManager;
 
 public class ServerExpansion extends PlaceholderExpansion implements Cacheable, Configurable {
 
@@ -52,6 +53,8 @@ public class ServerExpansion extends PlaceholderExpansion implements Cacheable, 
 	private String low = "&c";
 	private String medium = "&e";
 	private String high = "&a";
+	private boolean isPapermc = false;
+	private TickListener tickListener;
 
 	private final String VERSION = getClass().getPackage().getImplementationVersion();
 
@@ -71,6 +74,18 @@ public class ServerExpansion extends PlaceholderExpansion implements Cacheable, 
 		low = this.getString("tps_color.low", "&c");
 		medium = this.getString("tps_color.medium", "&e");
 		high = this.getString("tps_color.high", "&a");
+
+		try {
+			isPapermc = Class.forName("com.destroystokyo.paper.VersionHistoryManager$VersionData") != null;
+		} catch (ClassNotFoundException e) {}
+
+		if (isPapermc) {
+			PluginManager pluginManager = Bukkit.getPluginManager();
+
+			tickListener = new TickListener();
+			pluginManager.registerEvents(tickListener, pluginManager.getPlugin("PlaceholderAPI"));
+		}
+
 		return super.register();
 	}
 
@@ -120,6 +135,8 @@ public class ServerExpansion extends PlaceholderExpansion implements Cacheable, 
 			return serverName == null ? "" : serverName;
 		case "tps":
 			return getTps(null);
+		case "mspt":
+			return getMspt(null);
 		case "online":
 			return String.valueOf(Bukkit.getOnlinePlayers().size());
 		case "max_players":
@@ -164,6 +181,12 @@ public class ServerExpansion extends PlaceholderExpansion implements Cacheable, 
 			identifier = identifier.replace("tps_", "");
 			return getTps(identifier);
 		}
+
+		if (identifier.startsWith("mspt_")) {
+			identifier = identifier.replace("mspt_", "");
+			return getMspt(identifier);
+		}
+
 
 		if (identifier.startsWith("online_")) {
 
@@ -318,4 +341,35 @@ public class ServerExpansion extends PlaceholderExpansion implements Cacheable, 
 		return null;
 	}
 
+	private static double round(double value, int precision) {
+		int scale = (int) Math.pow(10, precision);
+		return (double) Math.round(value * scale) / scale;
+	}
+
+	private String colorMspt(double mspt) {
+		return ChatColor.translateAlternateColorCodes('&', (mspt < 25.0) ? high : (mspt < 50.0) ? medium : low) + mspt;
+	}
+
+	public String getMspt(String arg) {
+		int idx = 0;
+		boolean colored = false;
+
+		if (!(arg == null || arg.isEmpty())) {
+			colored = arg.endsWith("_colored") || arg.equals("colored");
+
+			if (arg.startsWith("10s")){
+				idx = 1;
+			} else if (arg.startsWith("1m")){
+				idx = 2;
+			}
+		}
+
+		double mspt = round(tickListener.getAverages()[idx], 1);
+
+		if (colored) {
+			return colorMspt(mspt);
+		} else {
+			return String.valueOf(mspt);
+		}
+	}
 }
