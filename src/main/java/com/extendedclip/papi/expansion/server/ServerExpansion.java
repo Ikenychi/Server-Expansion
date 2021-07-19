@@ -20,19 +20,11 @@
  */
 package com.extendedclip.papi.expansion.server;
 
-import java.lang.reflect.Field;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
-
 import me.clip.placeholderapi.PlaceholderAPI;
 import me.clip.placeholderapi.PlaceholderAPIPlugin;
 import me.clip.placeholderapi.expansion.Cacheable;
 import me.clip.placeholderapi.expansion.Configurable;
 import me.clip.placeholderapi.expansion.PlaceholderExpansion;
-import me.clip.placeholderapi.util.TimeUtil;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.OfflinePlayer;
@@ -41,9 +33,21 @@ import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.PluginManager;
 
+import java.lang.management.ManagementFactory;
+import java.lang.reflect.Field;
+import java.text.SimpleDateFormat;
+import java.time.Duration;
+import java.time.temporal.ChronoUnit;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 public class ServerExpansion extends PlaceholderExpansion implements Cacheable, Configurable {
 
-	private final Map<String, SimpleDateFormat> dateFormats = new HashMap<String, SimpleDateFormat>();
+	private final Map<String, SimpleDateFormat> dateFormats = new HashMap<>();
 	private final int MB = 1048576;
 	private final Runtime runtime = Runtime.getRuntime();
 	private Object craftServer;
@@ -55,21 +59,27 @@ public class ServerExpansion extends PlaceholderExpansion implements Cacheable, 
 	private String high = "&a";
 	private boolean isPapermc = false;
 	private TickListener tickListener;
+	private String variant;
 
 	private final String VERSION = getClass().getPackage().getImplementationVersion();
 
 	public ServerExpansion() {
 		try {
 			version = Bukkit.getServer().getClass().getPackage().getName().split("\\.")[3];
-			craftServer = Class.forName("net.minecraft.server." + version + ".MinecraftServer").getMethod("getServer").invoke(null);
+			if (minecraftVersion() >= 17) {
+				craftServer = Class.forName("net.minecraft.server.MinecraftServer").getMethod("getServer").invoke(null);
+			} else {
+				craftServer = Class.forName("net.minecraft.server." + version + ".MinecraftServer").getMethod("getServer").invoke(null);
+			}
 			tps = craftServer.getClass().getField("recentTps");
+			variant = initializeVariant();
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
 	}
 
 	@Override
-	public boolean register() {
+	public boolean canRegister() {
 		serverName = this.getString("server_name", "A Minecraft Server");
 		low = this.getString("tps_color.low", "&c");
 		medium = this.getString("tps_color.medium", "&e");
@@ -86,7 +96,7 @@ public class ServerExpansion extends PlaceholderExpansion implements Cacheable, 
 			pluginManager.registerEvents(tickListener, pluginManager.getPlugin("PlaceholderAPI"));
 		}
 
-		return super.register();
+		return true;
 	}
 
 	@Override
@@ -103,11 +113,6 @@ public class ServerExpansion extends PlaceholderExpansion implements Cacheable, 
 	}
 
 	@Override
-	public String getPlugin() {
-		return null;
-	}
-
-	@Override
 	public String getAuthor() {
 		return "clip";
 	}
@@ -117,9 +122,33 @@ public class ServerExpansion extends PlaceholderExpansion implements Cacheable, 
 		return VERSION;
 	}
 
+	public String initializeVariant() {
+		try {
+			Class.forName("net.pl3x.purpur.PurpurConfig");
+			return "Purpur";
+		} catch (ClassNotFoundException e) {
+			try {
+				Class.forName("com.tuinity.tuinity.config.TuinityConfig");
+				return "Tuinity";
+			} catch (ClassNotFoundException e1) {
+				try {
+					Class.forName("com.destroystokyo.paper.PaperConfig");
+					return "Paper";
+				} catch (ClassNotFoundException e2) {
+					try {
+						Class.forName("org.spigotmc.SpigotConfig");
+						return "Spigot";
+					} catch (ClassNotFoundException e3) {
+						return "Unknown";
+					}
+				}
+			}
+		}
+	}
+
 	@Override
 	public Map<String, Object> getDefaults() {
-		Map<String, Object> defaults = new HashMap<>();
+		final Map<String, Object> defaults = new HashMap<>();
 		defaults.put("tps_color.high", "&a");
 		defaults.put("tps_color.medium", "&e");
 		defaults.put("tps_color.low", "&c");
@@ -133,6 +162,8 @@ public class ServerExpansion extends PlaceholderExpansion implements Cacheable, 
 		switch (identifier) {
 		case "name":
 			return serverName == null ? "" : serverName;
+		case "variant":
+			return variant;
 		case "tps":
 			return getTps(null);
 		case "mspt":
@@ -144,7 +175,8 @@ public class ServerExpansion extends PlaceholderExpansion implements Cacheable, 
 		case "unique_joins":
 			return String.valueOf(Bukkit.getOfflinePlayers().length);
 		case "uptime":
-			return getPlaceholderAPI().getUptime();
+			long seconds = TimeUnit.MILLISECONDS.toSeconds(ManagementFactory.getRuntimeMXBean().getUptime());
+			return formatTime(Duration.of(seconds, ChronoUnit.SECONDS));
 		case "has_whitelist":
 			return Bukkit.getServer().hasWhitelist() ? PlaceholderAPIPlugin.booleanTrue() : PlaceholderAPIPlugin.booleanFalse();
 		case "version":
@@ -223,7 +255,7 @@ public class ServerExpansion extends PlaceholderExpansion implements Cacheable, 
 					return "0";
 				}
 
-				return TimeUtil.getTime((int) TimeUnit.MILLISECONDS.toSeconds(between));
+				return formatTime(Duration.of((int) TimeUnit.MILLISECONDS.toSeconds(between), ChronoUnit.SECONDS));
 
 			} else {
 
@@ -261,7 +293,7 @@ public class ServerExpansion extends PlaceholderExpansion implements Cacheable, 
 					return "0";
 				}
 
-				return TimeUtil.getTime((int) TimeUnit.MILLISECONDS.toSeconds(between));
+				return formatTime(Duration.of((int) TimeUnit.MILLISECONDS.toSeconds(between), ChronoUnit.SECONDS));
 
 			}
 		}
@@ -284,7 +316,7 @@ public class ServerExpansion extends PlaceholderExpansion implements Cacheable, 
 				return null;
 			}
 		}
-		
+
 		return null;
 	}
 
@@ -372,4 +404,81 @@ public class ServerExpansion extends PlaceholderExpansion implements Cacheable, 
 			return String.valueOf(mspt);
 		}
 	}
+
+	/**
+	 * @author Sxtanna
+	 */
+	public static String formatTime(final Duration duration) {
+		final StringBuilder builder = new StringBuilder();
+
+		long seconds = duration.getSeconds();
+		long minutes = seconds / 60;
+		long hours = minutes / 60;
+		long days = hours / 24;
+		final long weeks = days / 7;
+
+		seconds %= 60;
+		minutes %= 60;
+		hours %= 24;
+		days %= 7;
+
+		if (seconds > 0) {
+			builder.insert(0, seconds + "s");
+		}
+
+		if (minutes > 0) {
+			if (builder.length() > 0) {
+				builder.insert(0, ' ');
+			}
+
+			builder.insert(0, minutes + "m");
+		}
+
+		if (hours > 0) {
+			if (builder.length() > 0) {
+				builder.insert(0, ' ');
+			}
+
+			builder.insert(0, hours + "h");
+		}
+
+		if (days > 0) {
+			if (builder.length() > 0) {
+				builder.insert(0, ' ');
+			}
+
+			builder.insert(0, days + "d");
+		}
+
+		if (weeks > 0) {
+			if (builder.length() > 0) {
+				builder.insert(0, ' ');
+			}
+
+			builder.insert(0, weeks + "w");
+		}
+
+		return builder.toString();
+	}
+
+	/**
+	 * Helper method to return the major version that the server is running.
+	 *
+	 * This is needed because in 1.17, NMS is no longer versioned.
+	 *
+	 * @return the major version of Minecraft the server is running
+	 */
+	public static int minecraftVersion() {
+		try {
+			final Matcher matcher = Pattern.compile("\\(MC: (\\d)\\.(\\d+)\\.?(\\d+?)?\\)").matcher(Bukkit.getVersion());
+			if (matcher.find()) {
+				return Integer.parseInt(matcher.toMatchResult().group(2), 10);
+			} else {
+				throw new IllegalArgumentException(String.format("No match found in '%s'", Bukkit.getVersion()));
+			}
+		} catch (final IllegalArgumentException ex) {
+			throw new RuntimeException("Failed to determine Minecraft version", ex);
+		}
+	}
+
 }
