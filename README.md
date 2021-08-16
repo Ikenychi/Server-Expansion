@@ -23,7 +23,7 @@ This fork requires [Paper](https://papermc.io),
 it will NOT work with spigot servers.
 ( but you should be using Paper anyway )
 
-## Build Isntructions
+## Build Instructions
 
 This is built using [Maven](https://maven.apache.org/),
 you will have to install that first
